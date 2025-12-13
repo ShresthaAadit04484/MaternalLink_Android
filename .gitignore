@@ -1,0 +1,44 @@
+# ======================
+# Android / Gradle
+# ======================
+
+# Build outputs
+/build/
+**/build/
+
+# Gradle
+.gradle/
+gradle-app.setting
+
+# Local configuration
+local.properties
+
+# ======================
+# Android Studio / IntelliJ
+# ======================
+.idea/
+*.iml
+
+# ======================
+# OS / Misc
+# ======================
+.DS_Store
+Thumbs.db
+*.log
+
+# ======================
+# Keystore (CRITICAL)
+# ======================
+*.jks
+*.keystore
+
+# ======================
+# Native / NDK
+# ======================
+.externalNativeBuild/
+.cxx/
+
+# ======================
+# Media / Captures
+# ======================
+captures/
