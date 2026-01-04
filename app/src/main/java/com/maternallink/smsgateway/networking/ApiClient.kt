@@ -1,6 +1,5 @@
 package com.maternallink.smsgateway.networking
 
-import com.maternallink.smsgateway.models.DeliveryReport
 import com.maternallink.smsgateway.models.OutboxResponse
 import retrofit2.Response
 import retrofit2.Retrofit
