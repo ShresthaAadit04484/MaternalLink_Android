@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "com.maternallink.smsgateway"
-        minSdk = 19
+        minSdk = 21
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -49,6 +49,17 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.work.ktx)
     implementation(libs.lifecycle.service)
+
+    // Retrofit
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.gson)
+
+    // OkHttp
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+
+    // Gson
+    implementation(libs.gson)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
