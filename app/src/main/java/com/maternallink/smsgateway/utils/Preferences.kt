@@ -2,6 +2,7 @@ package com.maternallink.smsgateway.utils
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 
 object Preferences {
     private const val PREFS_NAME = "sms_gateway_prefs"
@@ -28,7 +29,7 @@ object Preferences {
     }
 
     fun setServerUrl(context: Context, url: String) {
-        getPrefs(context).edit().putString(KEY_SERVER_URL, url).apply()
+        getPrefs(context).edit { putString(KEY_SERVER_URL, url) }
     }
 
     fun getSecretToken(context: Context): String {
@@ -36,7 +37,7 @@ object Preferences {
     }
 
     fun setSecretToken(context: Context, token: String) {
-        getPrefs(context).edit().putString(KEY_SECRET_TOKEN, token).apply()
+        getPrefs(context).edit { putString(KEY_SECRET_TOKEN, token) }
     }
 
     fun getSyncInterval(context: Context): Int {
@@ -44,7 +45,7 @@ object Preferences {
     }
 
     fun setSyncInterval(context: Context, interval: Int) {
-        getPrefs(context).edit().putInt(KEY_SYNC_INTERVAL, interval).apply()
+        getPrefs(context).edit { putInt(KEY_SYNC_INTERVAL, interval) }
     }
 
     fun getMaxMessages(context: Context): Int {
@@ -52,7 +53,7 @@ object Preferences {
     }
 
     fun setMaxMessages(context: Context, max: Int) {
-        getPrefs(context).edit().putInt(KEY_MAX_MESSAGES, max).apply()
+        getPrefs(context).edit { putInt(KEY_MAX_MESSAGES, max) }
     }
 
     fun isServiceEnabled(context: Context): Boolean {
@@ -60,7 +61,7 @@ object Preferences {
     }
 
     fun setServiceEnabled(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_SERVICE_ENABLED, enabled).apply()
+        getPrefs(context).edit { putBoolean(KEY_SERVICE_ENABLED, enabled) }
     }
 
     fun getLastSync(context: Context): Long {
@@ -68,7 +69,7 @@ object Preferences {
     }
 
     fun setLastSync(context: Context, timestamp: Long) {
-        getPrefs(context).edit().putLong(KEY_LAST_SYNC, timestamp).apply()
+        getPrefs(context).edit { putLong(KEY_LAST_SYNC, timestamp) }
     }
 
     fun isBatteryOptimizationDisabled(context: Context): Boolean {
@@ -76,7 +77,7 @@ object Preferences {
     }
 
     fun setBatteryOptimizationDisabled(context: Context, disabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_BATTERY_OPTIMIZATION, disabled).apply()
+        getPrefs(context).edit { putBoolean(KEY_BATTERY_OPTIMIZATION, disabled) }
     }
 
     fun validateSettings(context: Context): Pair<Boolean, String> {
