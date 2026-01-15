@@ -19,47 +19,49 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
         if (!Preferences.isServiceEnabled(applicationContext)) {
             Log.d(TAG, "Service disabled, skipping sync")
-            return Result.retry()
+            return Result.success() // Changed to success so it doesn't keep retrying if disabled
         }
 
         return try {
             val apiService = RetrofitClient.getApiService(applicationContext)
             val secret = Preferences.getSecretToken(applicationContext)
 
-            // Fetch messages from server
             val response = apiService.getOutgoingMessages(secret)
 
             if (response.isSuccessful) {
                 val outgoingResponse = response.body()
 
                 if (outgoingResponse?.payload?.success == true) {
-                    val messages = outgoingResponse.messages
+                    // Warning Fix: Just use the messages directly if the model says they can't be null
+                    val messages = outgoingResponse.messages ?: emptyList()
 
                     Log.d(TAG, "Fetched ${messages.size} messages from server")
 
                     if (messages.isNotEmpty()) {
-                        // Send SMS messages
                         val smsSender = SmsSender(applicationContext)
+
+                        // FIX: Call this ONCE and store the result
                         val results = smsSender.sendMessages(messages)
 
                         val successCount = results.count { it is SmsSender.SendResult.Success }
-                        val failureCount = results.count { it is SmsSender.SendResult.Failure}
-
+                        val failureCount = results.count { it is SmsSender.SendResult.Failure }
                         Log.i(TAG, "Sent $successCount messages, $failureCount failed")
-
-                        Preferences.setLastSync(applicationContext, System.currentTimeMillis())
                     }
+
+                    // Update the timestamp so MainActivity shows the new time
+                    Preferences.setLastSync(applicationContext, System.currentTimeMillis())
+                    Result.success()
                 } else {
-                    Log.e(TAG, "Server returned error: ${outgoingResponse?.payload?.error}")
+                    Log.e(TAG, "Server error logic: ${outgoingResponse?.payload?.error}")
+                    Result.failure() // Tells MainActivity "Sync Failed"
                 }
             } else {
-                Log.e(TAG, "Failed to fetch messages: ${response.code()} ${response.message()}")
+                Log.e(TAG, "HTTP Error: ${response.code()}")
+                Result.failure() // Tells MainActivity "Sync Failed"
             }
-
-            Result.success()
         } catch (e: Exception) {
-            Log.e(TAG, "Error in sync worker: ${e.message}")
-            Result.retry()
+            Log.e(TAG, "Network Error: ${e.message}")
+            Result.retry() // Tells WorkManager to try again later if Wi-Fi dropped
         }
     }
 }

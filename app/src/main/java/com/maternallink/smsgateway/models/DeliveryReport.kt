@@ -1,7 +1,5 @@
 package com.maternallink.smsgateway.models
 
-import kotlin.uuid.Uuid
-
 data class DeliveryReport(
     val uuid: String,
     val status: String,

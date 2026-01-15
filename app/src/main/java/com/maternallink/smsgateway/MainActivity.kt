@@ -3,82 +3,285 @@ package com.maternallink.smsgateway
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import android.widget.Button
 import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
+import androidx.annotation.RequiresApi
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.maternallink.smsgateway.services.SmsGatewayService  // ✅ ADD THIS
+import androidx.work.*
+import com.maternallink.smsgateway.services.SmsService
+import com.maternallink.smsgateway.utils.Preferences
+import com.maternallink.smsgateway.workers.SyncWorker
+import java.text.SimpleDateFormat
+import java.util.*
+import java.util.concurrent.TimeUnit
+
 class MainActivity : AppCompatActivity() {
-
-    private lateinit var statusText: TextView
-    private lateinit var startButton: Button
-    private lateinit var stopButton: Button
-
-    private val permissions = arrayOf(
-        Manifest.permission.SEND_SMS,
-        Manifest.permission.READ_SMS,
-        Manifest.permission.RECEIVE_SMS
-    )
-
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        if (permissions.all { it.value }) {
-            startGatewayService()
-            updateStatus("✅ Service running")
+    companion object {
+        private const val TAG = "MainActivity"
+        private const val PERMISSION_REQUEST_CODE = 100
+        private const val BATTERY_OPTIMIZATION_REQUEST = 101
+        private val REQUIRED_PERMISSIONS = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(
+                Manifest.permission.SEND_SMS,
+                Manifest.permission.RECEIVE_SMS,
+                Manifest.permission.READ_SMS,
+                Manifest.permission.POST_NOTIFICATIONS
+            )
         } else {
-            updateStatus("❌ Permissions denied")
+            arrayOf(
+                Manifest.permission.SEND_SMS,
+                Manifest.permission.RECEIVE_SMS,
+                Manifest.permission.READ_SMS
+            )
         }
     }
+
+    private lateinit var btnToggleService: Button
+    private lateinit var btnSettings: Button
+    private lateinit var btnSyncNow: Button
+    private lateinit var btnPermissions: Button
+    private lateinit var btnBattery: Button
+    private lateinit var tvStatus: TextView
+    private lateinit var tvLastSync: TextView
+    private lateinit var tvStats: TextView
+    private lateinit var tvVersion: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Initialize views
-        statusText = findViewById(R.id.statusText)
-        startButton = findViewById(R.id.startButton)
-        stopButton = findViewById(R.id.stopButton)
+        initViews()
+        checkPermissions()
+        updateUI()
 
-        startButton.setOnClickListener {
-            checkPermissionsAndStart()
+        if (!Preferences.isBatteryOptimizationDisabled(this)) {
+            checkBatteryOptimization()
         }
 
-        stopButton.setOnClickListener {
-            stopService(Intent(this, SmsGatewayService::class.java))
-            updateStatus("🛑 Service stopped")
+        if (Preferences.isServiceEnabled(this) && hasRequiredPermissions()) {
+            startSmsService()
         }
-
-        updateStatus("📱 Ready to start")
     }
 
-    private fun checkPermissionsAndStart() {
-        if (permissions.all {
-                ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-            }) {
-            startGatewayService()
-            updateStatus("✅ Service running")
+    override fun onResume() {
+        super.onResume()
+        updateUI()
+    }
+
+    private fun initViews() {
+        btnToggleService = findViewById(R.id.btnToggleService)
+        btnSettings = findViewById(R.id.btnSettings)
+        btnSyncNow = findViewById(R.id.btnSyncNow)
+        btnPermissions = findViewById(R.id.btnPermissions)
+        btnBattery = findViewById(R.id.btnBattery)
+        tvStatus = findViewById(R.id.tvStatus)
+        tvLastSync = findViewById(R.id.tvLastSync)
+        tvStats = findViewById(R.id.tvStats)
+        tvVersion = findViewById(R.id.tvVersion)
+
+        btnToggleService.setOnClickListener { toggleService() }
+        btnSettings.setOnClickListener { openSettings() }
+        btnSyncNow.setOnClickListener { syncNow() }
+        btnPermissions.setOnClickListener { requestPermissions() }
+        btnBattery.setOnClickListener { openBatterySettings() }
+
+        try {
+            val packageInfo = packageManager.getPackageInfo(packageName, 0)
+            tvVersion.text = "Version ${packageInfo.versionName}"
+        } catch (e: PackageManager.NameNotFoundException) {
+            tvVersion.text = "Version 1.0"
+        }
+    }
+
+    private fun checkPermissions(): Boolean {
+        val missingPermissions = REQUIRED_PERMISSIONS.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        return if (missingPermissions.isNotEmpty()) {
+            ActivityCompat.requestPermissions(
+                this,
+                missingPermissions.toTypedArray(),
+                PERMISSION_REQUEST_CODE
+            )
+            false
         } else {
-            permissionLauncher.launch(permissions)
+            true
         }
     }
 
-    private fun startGatewayService() {
-        val serviceIntent = Intent(this, SmsGatewayService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
+    private fun hasRequiredPermissions(): Boolean {
+        return REQUIRED_PERMISSIONS.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            if (allGranted) {
+                if (Preferences.isServiceEnabled(this)) {
+                    startSmsService()
+                }
+            } else {
+                AlertDialog.Builder(this)
+                    .setTitle("Permissions Required")
+                    .setMessage("This app needs SMS permissions to function. Please grant them in Settings.")
+                    .setPositiveButton("Open Settings") { _, _ -> openAppSettings() }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+            updateUI()
+        }
+    }
+
+    private fun updateUI() {
+        val serviceEnabled = Preferences.isServiceEnabled(this)
+        val hasPermissions = hasRequiredPermissions()
+        val lastSync = Preferences.getLastSync(this)
+
+        if (serviceEnabled && hasPermissions) {
+            tvStatus.text = "Service: Running ✅"
+            tvStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_green_dark))
+            btnToggleService.text = "Stop Service"
+        } else if (!hasPermissions) {
+            tvStatus.text = "Service: Permissions Needed ⚠️"
+            tvStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_orange_dark))
+            btnToggleService.text = "Start Service"
+            btnToggleService.isEnabled = false
         } else {
-            startService(serviceIntent)
+            tvStatus.text = "Service: Stopped ❌"
+            tvStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
+            btnToggleService.text = "Start Service"
+            btnToggleService.isEnabled = true
         }
-        Log.d("MainActivity", "🚀 Starting SMS Gateway Service")
+
+        if (lastSync > 0) {
+            val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+            tvLastSync.text = "Last Sync: ${dateFormat.format(Date(lastSync))}"
+        } else {
+            tvLastSync.text = "Last Sync: Never"
+        }
+
+        btnSyncNow.isEnabled = serviceEnabled && hasPermissions
+        btnPermissions.isEnabled = !hasPermissions
     }
 
-    private fun updateStatus(message: String) {
-        statusText.text = message
-        Log.d("MainActivity", "Status: $message")
+    private fun toggleService() {
+        if (Preferences.isServiceEnabled(this)) {
+            Preferences.setServiceEnabled(this, false)
+            SmsService.stopService(this)
+        } else {
+            if (!hasRequiredPermissions()) {
+                requestPermissions()
+                return
+            }
+            Preferences.setServiceEnabled(this, true)
+            startSmsService()
+        }
+        updateUI()
+    }
+
+    private fun startSmsService() {
+        SmsService.startService(this)
+
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        // Note: Minimum periodic interval is 15 minutes (900 seconds)
+        val interval = Preferences.getSyncInterval(this).toLong()
+        val syncWorkRequest = PeriodicWorkRequestBuilder<SyncWorker>(
+            if (interval < 900) 15 else interval / 60, TimeUnit.MINUTES
+        )
+            .setConstraints(constraints)
+            .addTag(SyncWorker.WORK_NAME)
+            .build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            SyncWorker.WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            syncWorkRequest
+        )
+    }
+
+    private fun syncNow() {
+        val syncRequest = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+
+        val workManager = WorkManager.getInstance(this)
+        workManager.enqueue(syncRequest)
+
+        // Observe the worker's state in real-time
+        workManager.getWorkInfoByIdLiveData(syncRequest.id).observe(this) { workInfo ->
+            if (workInfo != null) {
+                when (workInfo.state) {
+                    WorkInfo.State.SUCCEEDED -> {
+                        updateUI() // Refreshes the "Last Sync" text immediately
+                        Toast.makeText(this, "Sync Successful!", Toast.LENGTH_SHORT).show()
+                    }
+                    WorkInfo.State.FAILED -> {
+                        Toast.makeText(this, "Sync Failed. Check Server URL/Network", Toast.LENGTH_LONG).show()
+                    }
+                    WorkInfo.State.ENQUEUED -> {
+                        // Optional: You could show a "Syncing..." status here
+                    }
+                    else -> { /* Task is still running or cancelled */ }
+                }
+            }
+        }
+    }
+
+    private fun checkBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(POWER_SERVICE) as PowerManager
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                AlertDialog.Builder(this)
+                    .setTitle("Battery Optimization")
+                    .setMessage("Please disable battery optimization for reliable background service.")
+                    .setPositiveButton("Disable") { _, _ -> requestBatteryOptimizationDisable() }
+                    .show()
+            }
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.M)
+    private fun requestBatteryOptimizationDisable() {
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        startActivityForResult(intent, BATTERY_OPTIMIZATION_REQUEST)
+    }
+
+    private fun openSettings() { startActivity(Intent(this, SettingsActivity::class.java)) }
+    private fun requestPermissions() { checkPermissions() }
+    private fun openBatterySettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
+    }
+    private fun openAppSettings() {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        startActivity(intent)
     }
 }

@@ -16,7 +16,7 @@ object Preferences {
 
     // Default values
     private const val DEFAULT_SERVER_URL = "http://192.168.1.100:8000/"
-    private const val DEFAULT_SECRET_TOKEN = "test-secret-123-change-in-production"
+    private const val DEFAULT_SECRET_TOKEN = "Te%T1Here@TH!SISFin@llyW0RKInG$$$!"
     private const val DEFAULT_SYNC_INTERVAL = 30 // seconds
     private const val DEFAULT_MAX_MESSAGES = 10
 
