@@ -69,4 +69,9 @@ object RetrofitClient {
             return networkInfo.isConnected
         }
     }
+
+    fun reset() {
+        apiService = null
+        retrofit = null
+    }
 }
