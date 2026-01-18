@@ -49,6 +49,7 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.work.ktx)
     implementation(libs.lifecycle.service)
+    implementation(libs.lifecycle.runtime.ktx)
 
     // Retrofit
     implementation(libs.retrofit)

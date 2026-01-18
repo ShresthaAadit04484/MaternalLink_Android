@@ -107,6 +107,12 @@
             android:text="Sync Now"
             android:layout_marginBottom="8dp" />
 
+        <Button
+            android:id="@+id/btnManualSync"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Sync &amp; Send Now" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
