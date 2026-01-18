@@ -14,54 +14,29 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         const val WORK_NAME = "sms_sync_worker"
     }
 
+    // In SyncWorker.kt (Simplified logic)
     override suspend fun doWork(): Result {
-        Log.d(TAG, "Starting sync worker")
-
-        if (!Preferences.isServiceEnabled(applicationContext)) {
-            Log.d(TAG, "Service disabled, skipping sync")
-            return Result.success() // Changed to success so it doesn't keep retrying if disabled
-        }
+        val context = applicationContext
+        val apiService = RetrofitClient.getApiService(context)
+        val smsSender = SmsSender(context)
+        val secret = Preferences.getSecretToken(context)
 
         return try {
-            val apiService = RetrofitClient.getApiService(applicationContext)
-            val secret = Preferences.getSecretToken(applicationContext)
-
+            // 1. Fetch pending messages from BE [cite: 408]
             val response = apiService.getOutgoingMessages(secret)
-
             if (response.isSuccessful) {
-                val outgoingResponse = response.body()
+                val messages = response.body()?.messages ?: emptyList()
 
-                if (outgoingResponse?.payload?.success == true) {
-                    // Warning Fix: Just use the messages directly if the model says they can't be null
-                    val messages = outgoingResponse.messages ?: emptyList()
-
-                    Log.d(TAG, "Fetched ${messages.size} messages from server")
-
-                    if (messages.isNotEmpty()) {
-                        val smsSender = SmsSender(applicationContext)
-
-                        // FIX: Call this ONCE and store the result
-                        val results = smsSender.sendMessages(messages)
-
-                        val successCount = results.count { it is SmsSender.SendResult.Success }
-                        val failureCount = results.count { it is SmsSender.SendResult.Failure }
-                        Log.i(TAG, "Sent $successCount messages, $failureCount failed")
-                    }
-
-                    // Update the timestamp so MainActivity shows the new time
-                    Preferences.setLastSync(applicationContext, System.currentTimeMillis())
-                    Result.success()
-                } else {
-                    Log.e(TAG, "Server error logic: ${outgoingResponse?.payload?.error}")
-                    Result.failure() // Tells MainActivity "Sync Failed"
+                // 2. Trigger the SmsSender [cite: 412]
+                if (messages.isNotEmpty()) {
+                    smsSender.sendMessages(messages)
                 }
+                Result.success()
             } else {
-                Log.e(TAG, "HTTP Error: ${response.code()}")
-                Result.failure() // Tells MainActivity "Sync Failed"
+                Result.retry()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Network Error: ${e.message}")
-            Result.retry() // Tells WorkManager to try again later if Wi-Fi dropped
+            Result.failure()
         }
     }
 }

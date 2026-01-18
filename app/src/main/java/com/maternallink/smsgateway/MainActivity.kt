@@ -6,8 +6,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
@@ -15,11 +13,15 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.RequiresApi
-import androidx.appcompat.app.AlertDialog
+import android.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope // Required for coroutines in Activity
+import kotlinx.coroutines.launch
+import com.maternallink.smsgateway.networking.SmsSender
 import androidx.work.*
+import com.maternallink.smsgateway.networking.RetrofitClient
 import com.maternallink.smsgateway.services.SmsService
 import com.maternallink.smsgateway.utils.Preferences
 import com.maternallink.smsgateway.workers.SyncWorker
@@ -222,34 +224,53 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    // In MainActivity.kt
     private fun syncNow() {
-        val syncRequest = OneTimeWorkRequestBuilder<SyncWorker>()
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-            .build()
+        if (!hasRequiredPermissions()) {
+            Toast.makeText(this, "Grant SMS permissions first", Toast.LENGTH_SHORT).show()
+            return
+        }
 
-        val workManager = WorkManager.getInstance(this)
-        workManager.enqueue(syncRequest)
+        // Modern loading indicator
+        val loading = AlertDialog.Builder(this)
+            .setMessage("Syncing and Sending...")
+            .setCancelable(false)
+            .create()
+        loading.show()
 
-        // Observe the worker's state in real-time
-        workManager.getWorkInfoByIdLiveData(syncRequest.id).observe(this) { workInfo ->
-            if (workInfo != null) {
-                when (workInfo.state) {
-                    WorkInfo.State.SUCCEEDED -> {
-                        updateUI() // Refreshes the "Last Sync" text immediately
-                        Toast.makeText(this, "Sync Successful!", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            try {
+                val apiService = RetrofitClient.getApiService(this@MainActivity)
+                val secret = Preferences.getSecretToken(this@MainActivity)
+
+                // 1. Get messages from BE
+                val response = apiService.getOutgoingMessages(secret)
+
+                Log.d("SMS_GATEWAY", "URL Called: ${response.raw().request.url}")
+                Log.d("SMS_GATEWAY", "Response Code: ${response.code()}")
+
+                if (response.isSuccessful) {
+                    val messages = response.body()?.messages ?: emptyList()
+
+                    if (messages.isNotEmpty()) {
+                        // 2. TRIGGER HARDWARE SMS SENDING
+                        val smsSender = SmsSender(this@MainActivity)
+                        smsSender.sendMessages(messages)
+
+                        Toast.makeText(this@MainActivity, "Successfully sent ${messages.size} SMS", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "Server queue is empty", Toast.LENGTH_SHORT).show()
                     }
-                    WorkInfo.State.FAILED -> {
-                        Toast.makeText(this, "Sync Failed. Check Server URL/Network", Toast.LENGTH_LONG).show()
-                    }
-                    WorkInfo.State.ENQUEUED -> {
-                        // Optional: You could show a "Syncing..." status here
-                    }
-                    else -> { /* Task is still running or cancelled */ }
+                    Preferences.setLastSync(this@MainActivity, System.currentTimeMillis())
+                    updateUI()
                 }
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                loading.dismiss()
             }
         }
     }
-
     private fun checkBatteryOptimization() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val powerManager = getSystemService(POWER_SERVICE) as PowerManager
@@ -284,4 +305,7 @@ class MainActivity : AppCompatActivity() {
         }
         startActivity(intent)
     }
+
+    // In MainActivity.kt
+
 }
